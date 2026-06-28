@@ -1,56 +1,154 @@
+"""Tests for the slide-puzzle engine."""
+
+from __future__ import annotations
+
 import unittest
-from slide_puzzle.engine import SlidePuzzle
+
+from slide_puzzle.core import (
+    Board,
+    Cell,
+    Color,
+    Direction,
+    Edge,
+    Shape,
+    Window,
+    puzzle_demo_simple,
+    puzzle_cross,
+)
+from slide_puzzle.engine import (
+    can_slide,
+    execute_slide,
+    is_won,
+    legal_moves,
+    new_game,
+)
 
 
-class TestSlidePuzzle(unittest.TestCase):
-    def test_initialization(self):
-        # Test a solved 2x2 puzzle
-        puzzle = SlidePuzzle(size=2, board=[1, 2, 3, 0])
-        self.assertEqual(puzzle.size, 2)
-        self.assertEqual(puzzle.board, [1, 2, 3, 0])
-        self.assertEqual(puzzle.blank_index, 3)
-        self.assertTrue(puzzle.is_solved())
+class TestPuzzleDataStructures(unittest.TestCase):
+    def test_board_validation(self) -> None:
+        with self.assertRaises(ValueError):
+            Board(rows=0, cols=4, windows=[], shapes=[])
 
-    def test_legal_moves(self):
-        # Test legal moves for a 2x2 puzzle with blank at index 3 (bottom right)
-        puzzle = SlidePuzzle(size=2, board=[1, 2, 3, 0])
-        # Blank at (1,1) -> up (tile 2 at index 1), left (tile 3 at index 2)
-        self.assertCountEqual(puzzle.legal_moves(), [2, 3])
+    def test_window_validation(self) -> None:
+        with self.assertRaises(ValueError):
+            Window(Edge.TOP, -1, Color.RED)
 
-        # Test legal moves for a 3x3 puzzle with blank at center (index 4)
-        puzzle = SlidePuzzle(size=3, board=[1, 2, 3, 4, 0, 5, 6, 7, 8])
-        # Blank at (1,1) -> up (2), down (7), left (4), right (5)
-        self.assertCountEqual(puzzle.legal_moves(), [2, 4, 5, 7])
+    def test_shape_occupied_cells(self) -> None:
+        shape = Shape(0, [Cell(0, 0), Cell(0, 1)], Color.RED, 2, 3)
+        self.assertEqual(shape.occupied_cells(), [(2, 3), (2, 4)])
 
-    def test_move(self):
-        puzzle = SlidePuzzle(size=2, board=[1, 2, 3, 0])
-        # blank at index 3. Tile 3 (index 2) is left-adjacent -> succeeds
-        self.assertTrue(puzzle.move(3))
-        self.assertEqual(puzzle.board, [1, 2, 0, 3])
-        self.assertEqual(puzzle.blank_index, 2)
-        self.assertEqual(puzzle.moves, 1)
+    def test_demo_puzzle_has_shapes_and_windows(self) -> None:
+        board = puzzle_demo_simple()
+        self.assertEqual(board.rows, 3)
+        self.assertEqual(board.cols, 4)
+        self.assertEqual(len(board.shapes), 3)
+        self.assertEqual(len(board.windows), 3)
 
-        # Tile 2 (now at index 1) is above blank (index 2) -> also adjacent
-        self.assertTrue(puzzle.move(2))
-        self.assertEqual(puzzle.board, [1, 0, 2, 3])
-        self.assertEqual(puzzle.blank_index, 1)
-        self.assertEqual(puzzle.moves, 2)
 
-    def test_move_non_adjacent_fails(self):
-        # Tile 1 (index 0) is diagonal to blank (index 3) in a 2x2, not adjacent
-        puzzle = SlidePuzzle(size=2, board=[1, 2, 3, 0])
-        self.assertFalse(puzzle.move(1))
-        self.assertEqual(puzzle.board, [1, 2, 3, 0])
-        self.assertEqual(puzzle.moves, 0)
+class TestEngineSlides(unittest.TestCase):
+    def setUp(self) -> None:
+        self.board = Board(
+            rows=4,
+            cols=4,
+            windows=[
+                Window(Edge.RIGHT, 1, Color.BLUE),
+                Window(Edge.TOP, 1, Color.RED),
+            ],
+            shapes=[
+                # A red monomino at (1, 1) — can slide UP to exit through
+                # the TOP edge window at column 1 (Color.RED).
+                Shape(0, [Cell(0, 0)], Color.RED, 1, 1),
+                # A blue monomino at (1, 3) — can slide RIGHT through the
+                # RIGHT edge window at row 1 (Color.BLUE).
+                Shape(1, [Cell(0, 0)], Color.BLUE, 1, 3),
+            ],
+            name="Test Board",
+        )
+        self.state = new_game(self.board)
 
-    def test_is_solved(self):
-        # Test solved state
-        puzzle = SlidePuzzle(size=3, board=[1, 2, 3, 4, 5, 6, 7, 8, 0])
-        self.assertTrue(puzzle.is_solved())
+    def test_slide_right_into_blocked_fails(self) -> None:
+        # Red at (1,1) slides RIGHT -> (1,2). Blue at (1,3) is not adjacent.
+        result = can_slide(self.state, 0, Direction.RIGHT)
+        self.assertTrue(result.success)
 
-        # Test unsolved state
-        puzzle = SlidePuzzle(size=3, board=[1, 2, 3, 4, 5, 6, 7, 0, 8])
-        self.assertFalse(puzzle.is_solved())
+        # Actually slide it right once
+        execute_slide(self.state, 0, Direction.RIGHT)
+        self.assertEqual(self.state.shapes[0].col, 2)
+
+    def test_slide_off_board_through_wrong_color_fails(self) -> None:
+        # Create a board where a red shape starts at (1,0) i.e. at the LEFT edge.
+        # Sliding LEFT exits the board — no LEFT window exists, so it fails.
+        board = Board(
+            rows=4, cols=4,
+            windows=[Window(Edge.RIGHT, 1, Color.BLUE)],
+            shapes=[Shape(0, [Cell(0, 0)], Color.RED, 1, 0)],
+            name="Wrong Color Test",
+        )
+        state = new_game(board)
+        result = can_slide(state, 0, Direction.LEFT)
+        self.assertFalse(result.success)
+        self.assertIn("window", result.reason.lower())
+
+    def test_slide_off_board_through_right_color_succeeds(self) -> None:
+        # Blue shape at (1,3). Slide RIGHT -> off through BLUE window -> removed!
+        result = can_slide(self.state, 1, Direction.RIGHT)
+        self.assertTrue(result.success)
+        self.assertTrue(result.shape_removed)
+
+        execute_slide(self.state, 1, Direction.RIGHT)
+        self.assertEqual(len(self.state.shapes), 1)
+        self.assertEqual(len(self.state.removed), 1)
+
+    def test_slide_up_through_red_window(self) -> None:
+        # Red shape at (1,0). Slide UP -> (0,0). Then UP again to exit.
+        execute_slide(self.state, 0, Direction.UP)  # row 0
+        self.assertEqual(self.state.shapes[0].row, 0)
+        result = can_slide(self.state, 0, Direction.UP)
+        self.assertTrue(result.success)
+        self.assertTrue(result.shape_removed)
+
+        execute_slide(self.state, 0, Direction.UP)
+        self.assertEqual(len(self.state.shapes), 1)  # only blue left
+        self.assertEqual(len(self.state.removed), 1)
+
+    def test_blocked_by_another_shape(self) -> None:
+        # Red at (1,1), blue at (1,3). Move red RIGHT 2 times to (1,3) where
+        # blue sits. Next RIGHT is blocked.
+        for _ in range(2):
+            execute_slide(self.state, 0, Direction.RIGHT)
+        result = can_slide(self.state, 0, Direction.RIGHT)
+        self.assertFalse(result.success)
+        self.assertIn("Blocked", result.reason)
+
+    def test_legal_moves(self) -> None:
+        moves = legal_moves(self.state)
+        self.assertIn(0, moves)
+        self.assertIn(1, moves)
+
+    def test_is_won(self) -> None:
+        self.assertFalse(is_won(self.state))
+        # Remove red: slide UP twice (row 1 -> row 0 -> exit through TOP/1)
+        execute_slide(self.state, 0, Direction.UP)
+        execute_slide(self.state, 0, Direction.UP)
+        # Remove blue: slide RIGHT once (exit through RIGHT/1)
+        execute_slide(self.state, 1, Direction.RIGHT)
+        self.assertTrue(is_won(self.state))
+
+
+class TestDemoPuzzleIntegration(unittest.TestCase):
+    def test_demo_simple_shape_count(self) -> None:
+        state = new_game(puzzle_demo_simple())
+        self.assertEqual(len(state.shapes), 3)
+
+    def test_cross_puzzle_shape_count(self) -> None:
+        state = new_game(puzzle_cross())
+        self.assertEqual(len(state.shapes), 4)
+
+    def test_move_count_tracks(self) -> None:
+        state = new_game(puzzle_demo_simple())
+        self.assertEqual(state.moves, 0)
+        execute_slide(state, 0, Direction.RIGHT)
+        self.assertEqual(state.moves, 1)
 
 
 if __name__ == "__main__":
