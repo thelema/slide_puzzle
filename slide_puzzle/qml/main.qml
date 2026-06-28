@@ -26,7 +26,7 @@ ApplicationWindow {
     // ── auto-solve player ─────────────────────────────────────────────
     Timer {
         id: solveTimer
-        interval: 400
+        interval: 350
         repeat: false
         onTriggered: {
             if (solveIndex < solveMoves.length) {
@@ -244,6 +244,19 @@ ApplicationWindow {
                             required property var modelData
                             property var shapeData: modelData
 
+                            // Grid-aligned base position (animated on change)
+                            x: boardWrapper.pad + shapeData.col * cellSize + 2
+                            y: boardWrapper.pad + shapeData.row * cellSize + 2
+
+                            Behavior on x { SmoothedAnimation { velocity: cellSize * 12; duration: 100 } }
+                            Behavior on y { SmoothedAnimation { velocity: cellSize * 12; duration: 100 } }
+
+                            // Drag offset via transform (does not fight x/y binding)
+                            transform: Translate {
+                                id: dragOffset
+                                x: 0; y: 0
+                            }
+
                             property rect bbox: {
                                 var minR = 9999, minC = 9999, maxR = -1, maxC = -1;
                                 for (var i = 0; i < shapeData.cells.length; i++) {
@@ -258,8 +271,6 @@ ApplicationWindow {
                                                (maxR - minR + 1) * cellSize);
                             }
 
-                            x: boardWrapper.pad + shapeData.col * cellSize + 2 + (dragItem.dragActive ? dragItem.dx : 0)
-                            y: boardWrapper.pad + shapeData.row * cellSize + 2 + (dragItem.dragActive ? dragItem.dy : 0)
                             width: bbox.width
                             height: bbox.height
 
@@ -268,7 +279,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.leftMargin: 3; anchors.topMargin: 3
                                 color: "#000000"
-                                opacity: 0.25
+                                opacity: dragArea.pressed ? 0.35 : 0.25
                                 radius: 6
                             }
 
@@ -305,56 +316,45 @@ ApplicationWindow {
                                 }
                             }
 
-                            // Drag controller
+                            // Drag controller – free follow using scene coords (immune to transform)
                             MouseArea {
-                                id: dragItem
-                                property bool dragActive: false
-                                property real startX: 0
-                                property real startY: 0
-                                property real dx: 0
-                                property real dy: 0
+                                id: dragArea
                                 anchors.fill: parent
                                 cursorShape: Qt.OpenHandCursor
                                 enabled: !solving
-                                drag.filterChildren: true
+
+                                property real startSceneX: 0
+                                property real startSceneY: 0
 
                                 onPressed: function(mouse) {
                                     cursorShape = Qt.ClosedHandCursor;
-                                    dragActive = true;
-                                    startX = mouse.x;
-                                    startY = mouse.y;
-                                    dx = 0;
-                                    dy = 0;
+                                    var scene = mapToItem(null, mouse.x, mouse.y);
+                                    startSceneX = scene.x;
+                                    startSceneY = scene.y;
+                                    dragOffset.x = 0;
+                                    dragOffset.y = 0;
                                 }
 
-                                onMouseXChanged: function(mouse) {
-                                    if (dragActive) {
-                                        dx = mouse.x - startX;
-                                        dy = mouse.y - startY;
-                                    }
-                                }
-
-                                onMouseYChanged: function(mouse) {
-                                    if (dragActive) {
-                                        dx = mouse.x - startX;
-                                        dy = mouse.y - startY;
-                                    }
+                                onPositionChanged: function(mouse) {
+                                    if (!pressed) return;
+                                    var scene = mapToItem(null, mouse.x, mouse.y);
+                                    dragOffset.x = scene.x - startSceneX;
+                                    dragOffset.y = scene.y - startSceneY;
                                 }
 
                                 onReleased: function(mouse) {
                                     cursorShape = Qt.OpenHandCursor;
-                                    dragActive = false;
                                     var threshold = cellSize * 0.35;
                                     var dir = "";
-                                    if (Math.abs(dx) > Math.abs(dy)) {
-                                        if (dx > threshold) dir = "right";
-                                        else if (dx < -threshold) dir = "left";
+                                    if (Math.abs(dragOffset.x) > Math.abs(dragOffset.y)) {
+                                        if (dragOffset.x > threshold) dir = "right";
+                                        else if (dragOffset.x < -threshold) dir = "left";
                                     } else {
-                                        if (dy > threshold) dir = "down";
-                                        else if (dy < -threshold) dir = "up";
+                                        if (dragOffset.y > threshold) dir = "down";
+                                        else if (dragOffset.y < -threshold) dir = "up";
                                     }
-                                    dx = 0;
-                                    dy = 0;
+                                    dragOffset.x = 0;
+                                    dragOffset.y = 0;
                                     if (dir !== "") {
                                         trySlideShape(shapeData.id, dir);
                                     }
