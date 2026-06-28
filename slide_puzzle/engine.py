@@ -6,6 +6,8 @@ through colored edge windows, and detecting win/loss states.
 
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass, field
 from typing import Dict, List, Set, Tuple
 
 from .core import (
@@ -106,6 +108,89 @@ def legal_moves(state: PuzzleState) -> Dict[int, List[Direction]]:
 def is_won(state: PuzzleState) -> bool:
     """All shapes have been removed from the board."""
     return len(state.shapes) == 0
+
+
+# ──────────────────────────────────────────────
+#  Solver (BFS)
+# ──────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _SolverState:
+    """Canonical, hashable snapshot of which shapes remain and where.
+
+    Each entry is a ``(shape_id, row, col)`` tuple, sorted by shape_id.
+    Shapes not present are considered removed.
+    """
+    placements: Tuple[Tuple[int, int, int], ...]
+
+    @staticmethod
+    def from_puzzle_state(state: PuzzleState) -> _SolverState:
+        return _SolverState(
+            placements=tuple(
+                sorted(
+                    (s.id, s.row, s.col) for s in state.shapes
+                ),
+            ),
+        )
+
+    def to_puzzle_state(self, board: Board) -> PuzzleState:
+        """Reconstruct a mutable PuzzleState from this solver state."""
+        shapes: List[Shape] = []
+        all_shape_defs = {s.id: s for s in board.shapes}
+        for sid, row, col in self.placements:
+            proto = all_shape_defs[sid]
+            shapes.append(Shape(sid, list(proto.cells), proto.color, row, col))
+        removed = [s for s in board.shapes if s.id not in {p[0] for p in self.placements}]
+        return PuzzleState(board=board, shapes=shapes, removed=list(removed))
+
+
+@dataclass
+class Solution:
+    """A sequence of moves that solves the puzzle."""
+    moves: List[Tuple[int, Direction]] = field(default_factory=list)
+
+    @property
+    def length(self) -> int:
+        return len(self.moves)
+
+
+def solve(board: Board) -> Solution:
+    """Find a shortest solution for the given *board* via BFS.
+
+    Returns a ``Solution`` with the move sequence.
+
+    Raises ``ValueError`` if no solution exists.
+    """
+    initial = new_game(board)
+    start = _SolverState.from_puzzle_state(initial)
+
+    if is_won(initial):
+        return Solution()
+
+    queue: deque[Tuple[_SolverState, List[Tuple[int, Direction]]]] = deque()
+    queue.append((start, []))
+    visited: Set[_SolverState] = {start}
+
+    while queue:
+        state, path = queue.popleft()
+        ps = state.to_puzzle_state(board)
+
+        for shape_id, dirs in legal_moves(ps).items():
+            for direction in dirs:
+                # Clone the state, apply the move
+                child_ps = state.to_puzzle_state(board)
+                execute_slide(child_ps, shape_id, direction)
+                child = _SolverState.from_puzzle_state(child_ps)
+
+                if child not in visited:
+                    new_path = path + [(shape_id, direction)]
+                    if is_won(child_ps):
+                        return Solution(moves=new_path)
+                    visited.add(child)
+                    queue.append((child, new_path))
+
+    raise ValueError("No solution exists for this puzzle")
 
 
 # ──────────────────────────────────────────────

@@ -20,7 +20,7 @@ from .core import (
     Window,
     all_puzzles,
 )
-from .engine import execute_slide, is_won, legal_moves, new_game
+from .engine import execute_slide, is_won, legal_moves, new_game, solve as engine_solve
 
 
 def _color_to_qml(color: Color) -> str:
@@ -140,3 +140,15 @@ class PuzzleAdapter(QObject):
     @Slot(result=bool)
     def isWon(self) -> bool:
         return is_won(self._state)
+
+    @Slot(result="QVariantList")
+    def solve(self) -> List[Dict[str, Any]]:
+        """Return a shortest solution as a list of {shape_id, direction} moves.
+
+        Raises ValueError (shown as a QML error dialog) if unsolvable.
+        """
+        solution = engine_solve(self._state.board)
+        return [
+            {"shape_id": sid, "direction": d.name.lower()}
+            for sid, d in solution.moves
+        ]

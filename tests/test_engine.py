@@ -21,6 +21,7 @@ from slide_puzzle.engine import (
     is_won,
     legal_moves,
     new_game,
+    solve,
 )
 
 
@@ -153,3 +154,43 @@ class TestDemoPuzzleIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSolver(unittest.TestCase):
+    def test_solve_demo_simple(self) -> None:
+        solution = solve(puzzle_demo_simple())
+        self.assertGreater(solution.length, 0)
+        # Verify the solution actually solves the puzzle
+        state = new_game(puzzle_demo_simple())
+        for shape_id, direction in solution.moves:
+            execute_slide(state, shape_id, direction)
+        self.assertTrue(is_won(state))
+
+    def test_solve_cross(self) -> None:
+        solution = solve(puzzle_cross())
+        self.assertGreater(solution.length, 0)
+        state = new_game(puzzle_cross())
+        for shape_id, direction in solution.moves:
+            execute_slide(state, shape_id, direction)
+        self.assertTrue(is_won(state))
+
+    def test_solve_unsolvable_raises(self) -> None:
+        # A monomino placed far from any matching window — unsolvable.
+        board = Board(
+            rows=3, cols=3,
+            windows=[Window(Edge.TOP, 0, Color.RED)],
+            shapes=[Shape(0, [Cell(0, 0)], Color.BLUE, 2, 2)],
+            name="Unsolvable",
+        )
+        with self.assertRaises(ValueError):
+            solve(board)
+
+    def test_solve_already_won(self) -> None:
+        board = Board(
+            rows=3, cols=3,
+            windows=[],
+            shapes=[],
+            name="Empty",
+        )
+        solution = solve(board)
+        self.assertEqual(solution.length, 0)

@@ -15,7 +15,7 @@ from .core import (
     puzzle_cross,
     puzzle_demo_simple,
 )
-from .engine import can_slide, execute_slide, is_won, legal_moves, new_game
+from .engine import can_slide, execute_slide, is_won, legal_moves, new_game, solve
 
 __all__ = [
     "Board",
